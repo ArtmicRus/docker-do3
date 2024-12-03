@@ -1,0 +1,111 @@
+version: '3' # Версия докер композа (аналогия как в HTML)
+
+services: # Различне сервисы например Фронтенд бекенд (или модули как у нас в проекте)
+  frontend:
+    build: 
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    container_name: docker-do3-frontend
+    command: serve -s build -l 3000 # Запускает dev сервер не prod (хотя этот файл для прода)
+    restart: unless-stopped # Легче гуглить но вкратце ответчает за рестарт образа
+    stdin_open: true # Последние 2 поля для работы докера с интерактивной консолью реакта
+    tty: true
+    volumes: # valumes судя по объяснению доп хранилища для контейнера, за пределами его внутреннего состояния
+      - ./frontend/src:/usr/src/app/src # Слева путь к папке src, значит мы хотим нашу папку SIM LINKнуть в папку /usr/src/app/src (В докерфайле это путь к проекту)
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+      - WDS_SOCKET_PORT=0
+    networks:
+      - docker-do3-network
+      
+  api: # Сервис api
+    build: ./api # Указываем откуда должен быть взят докер файл (Как я понял точка это текущий каталог и от него мы ищем внутри папку api где и лежит докерфайл для билда
+    container_name: docker-do3-api
+    command: npm run start # Команда которая выполнится при старте сервиса
+    restart: unless-stopped # Легче гуглить но вкратце ответчает за рестарт образа
+    #ports:
+    #  - "3001:3001" # Слева хоста = мой комп, справа порт контейнера (то есть правый это порт для сервиса который был открыт ранее)
+    environment: # Переменные окружения которые можно задавать для своего приложения
+      - PORT=3001 # В данном случае это порт который мы передадим приложению чтобы оно его знало
+    #  - HOST=http://realdocker-test.com
+      - MONGO_URL=mongodb://api_db:27017/api # Докер создаст хост для БД
+      - AUTH_API_URL=http://auth:3002/api
+    depends_on: # Указываем какие сервисы должны быть собраны перед сервисом api
+      - api_db
+    networks:
+      - docker-do3-network
+      
+  auth:
+    build: ./auth
+    container_name: docker-do3-auth
+    command: npm run start
+    restart: unless-stopped
+    #ports:
+    #  - "3002:3002"
+    environment:
+      - PORT=3002
+    #  - HOST=http://realdocker-test.com
+      - MONGO_URL=mongodb://auth_db:27017/auth
+      - API_URL=http://api:3001/api
+      - MAILER_API_URL=http://mailer:3003/api
+    depends_on: # Указываем какие сервисы должны быть собраны перед сервисом api
+      - api_db
+    networks:
+      - docker-do3-network
+      
+  mailer:
+    build: ./mailer
+    container_name: docker-do3-mailer
+    command: npm run start
+    restart: unless-stopped
+    #ports:
+    #  - "3003:3003"
+    environment:
+      - PORT=3003
+    #  - HOST=http://realdocker-test.com
+    #  - MONGO_URL=mongodb://auth_db:27017/auth
+    #  - API_URL=http://api:3001/api
+    #  - AUTH_API_URL=http://auth:3002/api
+    depends_on: # Указываем какие сервисы должны быть собраны перед сервисом api
+      - auth
+      - api
+    networks:
+      - docker-do3-network
+      
+  api_db:
+    image: mongo:latest # Мы можем скачать нужный нам образ для БД так
+    container_name: docker-do3-api-db
+    volumes: # valumes судя по лбъяснению доп хранилиза для контейнера, за пределами его внутреннего состояния
+      - mongodb_api:/data/db
+    networks:
+      - docker-do3-network
+      
+  auth_db:
+    image: mongo:latest
+    container_name: docker-do3-auth-db
+    volumes: # valumes судя по объяснению доп хранилище для контейнера, за пределами его внутреннего состояния
+      - mongodb_auth:/data/db
+    networks:
+      - docker-do3-network
+      
+  nginx:
+    image: nginx:stable-alpine
+    container_name: docker-do3-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf.prod:/etc/nginx/conf.d/nginx.conf
+    depends_on:
+      - frontend
+      - api
+      - auth
+    networks:
+      - docker-do3-network
+    
+volumes: # valume не только для хранения данных но и для того чтобы шарить (раздавать,показывать, делить) между сервисами
+  mongodb_api:
+  mongodb_auth:
+  
+networks:
+  docker-do3-network:
+    driver: bridge
